@@ -1,48 +1,27 @@
 let shapes = [];
 const gravity = 0.3;
 const friction = 0.99;
-const shapeSize = 15;
-let spawnRate = 0.15;
+const shapeSize = 10; // 크기 감소
+let spawnRate = 0.5; // 생성 속도 조정
+const maxShapes = 3000; // 최대 도형 개수 제한
 
 function setup() {
-  createCanvas(windowWidth, windowHeight);
+  createCanvas(1920, 380);
+  noCursor(); // 마우스 커서 숨기기
   
-  // 초기 도형들 생성
-  for (let i = 0; i < 3; i++) {
-    shapes.push(new Polygon(
-      random(width),
-      random(height * 0.3),
-      shapeSize
-    ));
+  // 초기에 화면 전체를 선으로 채우기
+  const gridSpacing = shapeSize * 2.5; // 선 간격
+  for (let y = height - shapeSize; y >= 0; y -= gridSpacing) {
+    for (let x = shapeSize; x < width; x += gridSpacing) {
+      let newShape = new Polygon(x, y, shapeSize);
+      newShape.isResting = false; // 움직이는 상태로 시작
+      shapes.push(newShape);
+    }
   }
 }
 
 function draw() {
   background(0, 0, 0);
-  
-  // 화면 상단이 채워졌는지 확인
-  let isScreenFilled = false;
-  let minHeight = height;
-  for (let shape of shapes) {
-    if (shape.isResting) {
-      minHeight = min(minHeight, shape.pos.y - shapeSize);
-    }
-  }
-  
-  // 화면 상단(y < shapeSize)이 차면 생성 중단
-  if (minHeight < shapeSize) {
-    isScreenFilled = true;
-    spawnRate = 0;
-  }
-  
-  // 새로운 도형 추가
-  if (random() < spawnRate) {
-    shapes.push(new Polygon(
-      random(shapeSize, width - shapeSize),
-      -shapeSize,
-      shapeSize
-    ));
-  }
   
   // 도형들 업데이트 및 표시
   for (let i = shapes.length - 1; i >= 0; i--) {
@@ -50,30 +29,22 @@ function draw() {
     
     // 물리 연산 적용
     shape.applyForce();
-    shape.checkBoundaries();
+    shape.checkBoundaries(); // 경계 체크
     shape.update();
     
-    // 다른 도형들과의 겹침 방지
+    // 근처 도형들과의 엉킴만 체크 (거리 기반 최적화)
+    const checkRadius = shape.size * 4; // 검사 범위
     for (let j = 0; j < shapes.length; j++) {
       if (i !== j && shapes[j]) {
-        shape.preventOverlap(shapes[j]);
-        // 다른 도형 위에 올려졌는지 확인
-        if (shapes[j].isResting && shape.isOnTopOf(shapes[j])) {
-          shape.vel.y = 0;
-          shape.vel.x = 0;
-          shape.rotationSpeed = 0;
-          shape.isResting = true;
+        let distance = dist(shape.pos.x, shape.pos.y, shapes[j].pos.x, shapes[j].pos.y);
+        if (distance < checkRadius) {
+          shape.preventOverlap(shapes[j]);
         }
       }
     }
     
     // 도형 표시
     shape.display();
-    
-    // 화면 아래로 떨어지고 충분히 오래된 도형 제거
-    if (shape.pos.y > height + shapeSize * 2 && shape.life > 60) {
-      shapes.splice(i, 1);
-    }
   }
 }
 
@@ -90,14 +61,40 @@ class Polygon {
     this.rotationSpeed = random(-0.05, 0.05);
     this.amplitude = random(5, 15);
     this.frequency = random(0.05, 0.15);
+    this.lineLength = random(1.2, 2.5); // 선의 길이를 무작위로
+    
+    // 노을에 비친 벼의 색상 (따뜻한 금색, 주황색, 붉은색)
+    let colorType = random();
+    if (colorType < 0.4) {
+      // 금색
+      this.r = random(200, 230);
+      this.g = random(160, 200);
+      this.b = random(80, 120);
+    } else if (colorType < 0.7) {
+      // 주황색
+      this.r = random(220, 245);
+      this.g = random(140, 180);
+      this.b = random(60, 100);
+    } else {
+      // 붉은색
+      this.r = random(210, 240);
+      this.g = random(100, 140);
+      this.b = random(80, 120);
+    }
   }
   
   applyForce() {
-    // 쉬는 상태가 아닐 때만 중력 적용
-    if (!this.isResting) {
-      this.acc.y += gravity;
-      this.vel.mult(friction);
-    }
+    // 파동 모션 - sine 파동으로 좌우 흔들림 (강화)
+    let waveForce = sin(this.life * 0.02) * 0.8;
+    this.acc.x += waveForce;
+    
+    // 중력을 거의 없애고 대신 중심으로의 약한 복원력 (전체 화면에 고르게 분포)
+    let centerY = height / 2;
+    let distanceFromCenter = this.pos.y - centerY;
+    this.acc.y += distanceFromCenter * 0.00005; // 매우 약한 중심 복원력
+    
+    // 마찰력
+    this.vel.mult(friction);
   }
   
   isOnTopOf(other) {
@@ -112,58 +109,50 @@ class Polygon {
   }
   
   update() {
-    // 쉬는 상태가 아닐 때만 업데이트
-    if (!this.isResting) {
-      // 도형 위치 업데이트
-      this.vel.add(this.acc);
-      this.pos.add(this.vel);
-      
-      // 가속도 초기화
-      this.acc.mult(0);
-      
-      // 회전 업데이트 (낙하 중일 때만)
-      this.rotation += this.rotationSpeed;
-    }
+    // 도형 위치 업데이트
+    this.vel.add(this.acc);
+    this.pos.add(this.vel);
+    
+    // 가속도 초기화
+    this.acc.mult(0);
+    
+    // 회전 업데이트
+    this.rotation += this.rotationSpeed;
     
     // 생존 시간은 항상 증가
     this.life++;
   }
   
   checkBoundaries() {
-    // 바닥 충돌
-    if (this.pos.y + this.size > height) {
-      this.pos.y = height - this.size;
-      
-      // 바닥에 닿으면 멈춤
+    // 위쪽 경계
+    if (this.pos.y - this.size < 0) {
+      this.pos.y = this.size;
       this.vel.y = 0;
-      this.vel.x = 0;
-      this.rotationSpeed = 0; // 회전도 멈춤
-      this.isResting = true;
     }
     
-    // 좌우 벽 충돌
+    // 바닥 경계
+    if (this.pos.y + this.size > height) {
+      this.pos.y = height - this.size;
+      this.vel.y = 0;
+    }
+    
+    // 좌측 경계
     if (this.pos.x - this.size < 0) {
       this.pos.x = this.size;
-      if (abs(this.vel.x) < 2) {
-        this.vel.x = 0;
-      } else {
-        this.vel.x *= -0.3;
-      }
+      this.vel.x *= -1; // 반대 방향
     }
+    
+    // 우측 경계
     if (this.pos.x + this.size > width) {
       this.pos.x = width - this.size;
-      if (abs(this.vel.x) < 2) {
-        this.vel.x = 0;
-      } else {
-        this.vel.x *= -0.3;
-      }
+      this.vel.x *= -1; // 반대 방향
     }
   }
   
   preventOverlap(other) {
     // 두 도형이 겹쳐있는지 확인
     let distance = dist(this.pos.x, this.pos.y, other.pos.x, other.pos.y);
-    let minDistance = (this.size + other.size) * 0.9; // 더 촘촘하게 쌓이도록 조정
+    let minDistance = (this.size + other.size) * 0.85; // 더 촘촘하게 조정
     
     if (distance < minDistance && distance > 0) {
       // 겹침을 분리하는 방향 계산
@@ -206,13 +195,13 @@ class Polygon {
     translate(this.pos.x, this.pos.y);
     rotate(this.rotation);
     
-    stroke(255);
-    strokeWeight(0.2); // 얇은 두께
+    stroke(this.r, this.g, this.b);
+    strokeWeight(0.2);
     noFill();
     
     // 구불한 선 그리기 (Sine 곡선)
     beginShape();
-    for (let x = -this.size * 1.5; x < this.size * 1.5; x += 2) {
+    for (let x = -this.size * this.lineLength; x < this.size * this.lineLength; x += 2) {
       let y = sin((x + this.life * this.frequency) * 0.05) * this.amplitude;
       vertex(x, y);
     }
@@ -220,8 +209,4 @@ class Polygon {
     
     pop();
   }
-}
-
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
 }
